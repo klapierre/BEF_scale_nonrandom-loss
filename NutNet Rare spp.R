@@ -255,6 +255,50 @@ ggplot(nutnet_finalabund2, aes(x=abund_metric, y=final_cover)) +
 #export at 1200x1200
 
 
+
+###bring in biomass (function) component
+biomass <- read.csv('full-biomass-09-June-2017.csv')%>%
+  filter(live==1)%>%
+  group_by(site_code, plot, subplot, year_trt)%>%
+  summarise(mass2=sum(mass))%>%
+  ungroup()%>%
+  group_by(site_code, plot, year_trt)%>%
+  summarise(anpp=mean(mass2))
+
+biomassSpp <- nutnetdf_allspp%>%
+  filter(rel_cover>0)%>%
+  merge(biomass, by=c('site_code', 'plot', 'year_trt'))%>%
+  merge(meanAb_byspecies, by=c('site_code', 'Taxon'))%>%
+  merge(max_abund, by=c('site_code', 'Taxon'))%>%
+  merge(freq, by=c('site_code', 'Taxon'))%>%
+  mutate(abund_metric=(2*meanPTAbundance+freq)/3)%>%
+  select(-PTfreq)%>%
+  group_by(site_code, plot, year_trt)%>%
+  summarise(biomass=mean(anpp), importance=mean(abund_metric), min_importance=min(abund_metric))
+
+ggplot(biomassSpp, aes(x=importance, y=biomass)) +
+  geom_point(size=3, alpha=0.1) +
+  xlab('Pre-Treatment Modified Importance Index') +
+  ylab('Aboveground Biomass')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   #spread(key=year_trt2, value=PA2)%>% ###I don't think we want to do this, because it is then unclear which are missing data and which are true 0s
 
   #mutate(yr_present=(length-yr1-yr2-yr3-yr4-yr5-yr6-yr7-yr8-yr9)/length) ###problem: can't sum over cells with NA, but most experiments have short datasets or missing data
