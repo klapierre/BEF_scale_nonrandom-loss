@@ -20,18 +20,26 @@ library(grid)
 nutnetdf <-read.csv("full-cover-09-June-2017.csv")
 # 
 # nutnetpretreatdt <- data.table(nutnetpretreatdf)
-# nutnetpretreatdt[, meanPTAbundance:=mean(max_cover, na.rm=T), .(year, site_code, Taxon)]
-# nutnetpretreatdt[, maxPTAbundance:=max(max_cover, na.rm=T), .(year, site_code, Taxon)]
+# nutnetpretreatdt[, meanPTAbundance:=mean(rel_cover, na.rm=T), .(year, site_code, Taxon)]
+# nutnetpretreatdt[, maxPTAbundance:=max(rel_cover, na.rm=T), .(year, site_code, Taxon)]
 # nutnetpretreatdt[, PTfreq:=sum(live==1, na.rm=T), .(year, site_code, Taxon)]
+
+#relative cover
+nutnetSum <- nutnetdf%>%
+  group_by(site_code, plot, year_trt)%>%
+  summarise(total_cover=sum(max_cover))
+nutnetRel <- nutnetdf%>%
+  left_join(nutnetSum)%>%
+  mutate(rel_cover=(max_cover/total_cover)*100)
 
 ## compute mean abundance, max abundance and frequency of each species in the pretreatment data 
 #filter to pretreatment data 
-nutnetpretreatdf <- nutnetdf[nutnetdf$year_trt == 0,]
-meanAb_byspecies <- aggregate(nutnetpretreatdf$max_cover, by = list(nutnetpretreatdf$year, nutnetpretreatdf$site_code, nutnetpretreatdf$Taxon), FUN = mean, na.rm = TRUE)
+nutnetpretreatdf <- nutnetRel[nutnetRel$year_trt == 0,]
+meanAb_byspecies <- aggregate(nutnetpretreatdf$rel_cover, by = list(nutnetpretreatdf$year, nutnetpretreatdf$site_code, nutnetpretreatdf$Taxon), FUN = mean, na.rm = TRUE)
 names(meanAb_byspecies) = c("year", "site_code", "Taxon", "meanPTAbundance")
 meanAb_byspecies <- meanAb_byspecies%>%
   select(-year)
-max_abund <-  aggregate(nutnetpretreatdf$max_cover, by = list(nutnetpretreatdf$year, nutnetpretreatdf$site_code, nutnetpretreatdf$Taxon), FUN = max, na.rm = TRUE)
+max_abund <-  aggregate(nutnetpretreatdf$rel_cover, by = list(nutnetpretreatdf$year, nutnetpretreatdf$site_code, nutnetpretreatdf$Taxon), FUN = max, na.rm = TRUE)
 names(max_abund) = c("year", "site_code", "Taxon", "maxPTAbundance")
 max_abund <- max_abund%>%
   select(-year)
@@ -39,23 +47,30 @@ max_abund <- max_abund%>%
 nutnetpretreatdf_live = nutnetpretreatdf[nutnetpretreatdf$live == 1,]
 freq <- aggregate(nutnetpretreatdf_live$live, by = list(nutnetpretreatdf_live$year, nutnetpretreatdf_live$site_code, nutnetpretreatdf_live$Taxon), FUN = sum, na.rm = TRUE)
 names(freq) = c("year", "site_code", "Taxon", "PTfreq")
+tot_plots <- nutnetpretreatdf_live%>%
+  select(site_code, plot)%>%
+  unique()%>%
+  group_by(site_code)%>%
+  summarise(num_plots=max(plot))
 freq <- freq%>%
-  select(-year)
+  select(-year)%>%
+  merge(tot_plots, by='site_code')%>%
+  mutate(freq=PTfreq/num_plots)
 
 #### Process data to create a max cover or 0 for each species, plot & year #### 
-nutnetdf_allspp <- nutnetdf %>%
+nutnetdf_allspp <- nutnetRel %>%
   select(-Family, -live:-ps_path) %>%
   group_by(site_name, site_code) %>%
   nest() %>%
-  mutate(spread_df = purrr::map(data, ~spread(., key=Taxon, value=max_cover, fill=0) %>%
-                                     gather(key=Taxon, value=max_cover,
+  mutate(spread_df = purrr::map(data, ~spread(., key=Taxon, value=rel_cover, fill=0) %>%
+                                     gather(key=Taxon, value=rel_cover,
                                             -year:-trt))) %>%
   unnest(spread_df)
 nutnetdf_allspp <- as.data.frame(nutnetdf_allspp)
 
 
 # make a column for presence absence of each species in a plot-year
-nutnetdf_allspp$PA = ifelse(nutnetdf_allspp$max_cover > 0, 1, 0)
+nutnetdf_allspp$PA = ifelse(nutnetdf_allspp$rel_cover > 0, 1, 0)
 
 nutnetdf_length <- as.data.frame(nutnetdf_allspp)%>%
   #make a column for max trt year and filter out max year <5
@@ -64,11 +79,11 @@ nutnetdf_length <- as.data.frame(nutnetdf_allspp)%>%
 
 nutnetdf_allspp2 <- nutnetdf_allspp%>%
   merge(nutnetdf_length, by='site_code')%>%
-  select(-year, -max_cover)%>%
+  select(-year, -rel_cover)%>%
   filter(year_trt>0)%>%
   mutate(year_trt2=paste("yr", year_trt, sep=''))%>%
   select(-year_trt, -trt)%>%
-  group_by(site_code, Taxon, site_name, block, plot, subplot, year_trt2, length)%>% ###there's duplicate entries for some spp
+  group_by(site_code, Taxon, site_name, block, plot, subplot, year_trt2, length)%>% ###there's duplicate entries for some spp; need to fix this some day
   summarise(PA2=mean(PA))%>%
   ungroup()%>%
   group_by(site_code, Taxon, site_name, block, plot, subplot, length)%>%
@@ -78,7 +93,7 @@ nutnetdf_allspp2 <- nutnetdf_allspp%>%
   merge(meanAb_byspecies, by=c('site_code', 'Taxon'), all=T)%>%
   merge(max_abund, by=c('site_code', 'Taxon'), all=T)%>%
   merge(freq, by=c('site_code', 'Taxon'), all=T)%>%
-  mutate(abund_metric=(2*meanPTAbundance+PTfreq)/3)%>%
+  mutate(abund_metric=(2*meanPTAbundance+freq)/3)%>%
   filter(length>0)
 
 
@@ -88,7 +103,7 @@ metricPlot <- ggplot(nutnetdf_allspp2, aes(x=abund_metric, y=yrs_absent, color=l
   xlab('Pre-Treatment Modified Importance Index') +
   ylab('Proportion of Years Absent')
 
-freqPlot <- ggplot(nutnetdf_allspp2, aes(x=PTfreq, y=yrs_absent, color=length)) +
+freqPlot <- ggplot(nutnetdf_allspp2, aes(x=freq, y=yrs_absent, color=length)) +
   geom_point() +
   xlab('Pre-Treatment Frequency') +
   ylab('Proportion of Years Absent')
@@ -111,9 +126,89 @@ print(maxAbundPlot, vp=viewport(layout.pos.row = 2, layout.pos.col = 2))
 #export at 1800 x 1600
 
 
+#get back trt info
+trt <- nutnetRel%>%
+  select(year_trt, site_code, plot, trt)%>%
+  filter(year_trt>0)%>%
+  select(-year_trt)%>%
+  unique()
+
+nutnetdf_allspp2Trt <- nutnetdf_allspp2%>%
+  merge(trt, by=c('site_code', 'plot'))
+
+ggplot(nutnetdf_allspp2Trt, aes(x=abund_metric, y=yrs_absent, color=length)) +
+  geom_point() +
+  xlab('Pre-Treatment Modified Importance Index') +
+  ylab('Proportion of Years Absent') +
+  facet_wrap(~trt)
+
+
+###count concecutive 0's: how long is a sp lost?
+cumul_zeros <- function(x)  {
+  x <- !x
+  rl <- rle(x)
+  len <- rl$lengths
+  v <- rl$values
+  cumLen <- cumsum(len)
+  z <- x
+  # replace the 0 at the end of each zero-block in z by the 
+  # negative of the length of the preceding 1-block....
+  iDrops <- c(0, diff(v)) < 0
+  z[ cumLen[ iDrops ] ] <- -len[ c(iDrops[-1],FALSE) ]
+  # ... to ensure that the cumsum below does the right thing.
+  # We zap the cumsum with x so only the cumsums for the 1-blocks survive:
+  x*cumsum(z)
+}
+
+nutnetOrder <- nutnetdf_allspp[with(nutnetdf_allspp, order(site_code, plot, Taxon, year)), ]
+
+nutnetConsAbs <- nutnetOrder%>%
+  filter(year_trt>0)%>%
+  group_by(site_code, plot, Taxon)%>%
+  nest()%>%
+  mutate(mutate_df = purrr::map(data, ~mutate(., cons_abs=cumul_zeros(PA))))%>%
+  unnest(mutate_df)
+
+nutnetConsAbs2 <- nutnetConsAbs%>%
+  group_by(site_code, plot, Taxon)%>%
+  summarise(cons_abs_max=max(cons_abs))%>%
+  ungroup()%>%
+  merge(trt, by=c('site_code', 'plot'))%>%
+  merge(meanAb_byspecies, by=c('site_code', 'Taxon'))%>%
+  merge(max_abund, by=c('site_code', 'Taxon'))%>%
+  merge(freq, by=c('site_code', 'Taxon'))%>%
+  mutate(abund_metric=(2*meanPTAbundance+PTfreq)/3)%>%
+  merge(nutnetdf_length, by=c('site_code'))
+
+ggplot(subset(nutnetConsAbs2, length==9), aes(x=abund_metric, y=cons_abs_max)) +
+  geom_point(alpha=0.1) +
+  xlab('Pre-Treatment Modified Importance Index') +
+  ylab('Consecutive Years Absent') +
+  facet_wrap(~trt)
+
+ggplot(subset(nutnetConsAbs2, length==9), aes(x=meanPTAbundance, y=cons_abs_max)) +
+  geom_point(alpha=0.1) +
+  xlab('Pre-Treatment Mean Abundance') +
+  ylab('Consecutive Years Absent') +
+  facet_wrap(~trt)
 
 
 
+
+
+###figures for year and pres/absence
+nutnetPresAbs <- nutnetdf_allspp%>%
+  merge(meanAb_byspecies, by=c('site_code', 'Taxon'))%>%
+  merge(max_abund, by=c('site_code', 'Taxon'))%>%
+  merge(freq, by=c('site_code', 'Taxon'))%>%
+  mutate(abund_metric=(2*meanPTAbundance+PTfreq)/3)%>%
+  filter(year_trt>0)
+
+ggplot(nutnetPresAbs, aes(x=abund_metric, y=PA, color=trt)) +
+  geom_point() +
+  xlab('Pre-Treatment Modified Importance Index') +
+  ylab('Presence (1)/Absence (0)') +
+  facet_wrap(~year_trt)
 
 
   #spread(key=year_trt2, value=PA2)%>% ###I don't think we want to do this, because it is then unclear which are missing data and which are true 0s
@@ -121,13 +216,13 @@ print(maxAbundPlot, vp=viewport(layout.pos.row = 2, layout.pos.col = 2))
   #mutate(yr_present=(length-yr1-yr2-yr3-yr4-yr5-yr6-yr7-yr8-yr9)/length) ###problem: can't sum over cells with NA, but most experiments have short datasets or missing data
 
 # library(data.table)
-# nutnetdt <- data.table(nutnetdf)
+# nutnetdt <- data.table(nutnetRel)
 # 
 # # create a data.table of unique species x year combos by site
 # site_spp_yr_dt <- nutnetdt[,expand.grid(unique(plot), unique(Taxon), unique(year)), by=site_code]
 # names(site_spp_yr_dt) <- c("site_code", "plot", "Taxon", "year")
 # filled_nutnetdt <- merge(nutnetdt, site_spp_yr_dt, by=c("site_code", "plot", "Taxon", "year"), all=T)
-# filled_nutnetdt[,PA:=!is.na(max_cover)]
+# filled_nutnetdt[,PA:=!is.na(rel_cover)]
 # filled_nutnetdt[,tot_site_years:=length(unique(year)), by=site_code]
 # filled_nutnetdt[,tot_spp_plot_years_present:=sum(PA), by=.(plot, site_code, Taxon)]
 # filled_nutnetdt[,frac_absent:=(tot_site_years-tot_spp_plot_years_present)/tot_site_years]
@@ -236,11 +331,11 @@ print(maxAbundPlot, vp=viewport(layout.pos.row = 2, layout.pos.col = 2))
 #   
 #   #creates a dataset for each unique site-year
 #   subset=nutnetdf_allspp[nutnetdf_allspp$site_code==as.character(site_code$site_code[i]),]%>%
-#     select(site_code, year, Taxon, max_cover, plot)%>%
+#     select(site_code, year, Taxon, rel_cover, plot)%>%
 #     group_by(site_code, year, plot, Taxon)%>%
-#     summarise(max_cover=max(max_cover))%>%
+#     summarise(rel_cover=max(rel_cover))%>%
 #     ungroup()%>%
-#     filter(max_cover>0)
+#     filter(rel_cover>0)
 #   
 #   #need this to keep track of sites
 #   labels=subset%>%
@@ -248,9 +343,9 @@ print(maxAbundPlot, vp=viewport(layout.pos.row = 2, layout.pos.col = 2))
 #     unique()
 #   
 #   #calculating appearances and disappearances (from previous year): for each year
-#   appear<-turnover_allyears(df=subset, time.var='year', species.var='Taxon', abundance.var='max_cover', metric='appearance')
-#   disappear<-turnover_allyears(df=subset, time.var='year', species.var='Taxon', abundance.var='max_cover', metric='disappearance')
-#   total<-turnover_allyears(df=subset, time.var='year', species.var='Taxon', abundance.var='max_cover', metric='total')
+#   appear<-turnover_allyears(df=subset, time.var='year', species.var='Taxon', abundance.var='rel_cover', metric='appearance')
+#   disappear<-turnover_allyears(df=subset, time.var='year', species.var='Taxon', abundance.var='rel_cover', metric='disappearance')
+#   total<-turnover_allyears(df=subset, time.var='year', species.var='Taxon', abundance.var='rel_cover', metric='total')
 #   
 #   #merging back with labels to get back experiment labels
 #   turnover<-merge(appear, disappear, by=c('year'))
