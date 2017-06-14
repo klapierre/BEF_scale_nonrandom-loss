@@ -15,6 +15,7 @@ require(ggplot2)
 library(dplyr)
 library(tidyr)
 library(purrr)
+library(grid)
 
 nutnetdf <-read.csv("full-cover-09-June-2017.csv")
 # 
@@ -42,9 +43,6 @@ freq <- freq%>%
   select(-year)
 
 #### Process data to create a max cover or 0 for each species, plot & year #### 
-
-
-#nutnetdf <- as.data.frame(nutnetpretreatdt)
 nutnetdf_allspp <- nutnetdf %>%
   select(-Family, -live:-ps_path) %>%
   group_by(site_name, site_code) %>%
@@ -80,11 +78,43 @@ nutnetdf_allspp2 <- nutnetdf_allspp%>%
   merge(meanAb_byspecies, by=c('site_code', 'Taxon'), all=T)%>%
   merge(max_abund, by=c('site_code', 'Taxon'), all=T)%>%
   merge(freq, by=c('site_code', 'Taxon'), all=T)%>%
-  mutate(abund_metric=2*meanPTAbundance+PTfreq)%>%
+  mutate(abund_metric=(2*meanPTAbundance+PTfreq)/3)%>%
   filter(length>0)
 
-ggplot(nutnetdf_allspp2, aes(x=abund_metric, y=yrs_absent, color=length)) +
-  geom_point()
+
+###figures of proportion of years absent for the various abundance metrics
+metricPlot <- ggplot(nutnetdf_allspp2, aes(x=abund_metric, y=yrs_absent, color=length)) +
+  geom_point() +
+  xlab('Pre-Treatment Modified Importance Index') +
+  ylab('Proportion of Years Absent')
+
+freqPlot <- ggplot(nutnetdf_allspp2, aes(x=PTfreq, y=yrs_absent, color=length)) +
+  geom_point() +
+  xlab('Pre-Treatment Frequency') +
+  ylab('Proportion of Years Absent')
+
+avgAbundPlot <- ggplot(nutnetdf_allspp2, aes(x=meanPTAbundance, y=yrs_absent, color=length)) +
+  geom_point() +
+  xlab('Pre-Treatment Mean Abundance') +
+  ylab('Proportion of Years Absent')
+
+maxAbundPlot <- ggplot(nutnetdf_allspp2, aes(x=maxPTAbundance, y=yrs_absent, color=length)) +
+  geom_point() +
+  xlab('Pre-Treatment Max Abundance') +
+  ylab('Proportion of Years Absent')
+
+pushViewport(viewport(layout=grid.layout(2,2)))
+print(metricPlot, vp=viewport(layout.pos.row = 1, layout.pos.col = 1))
+print(freqPlot, vp=viewport(layout.pos.row = 1, layout.pos.col = 2))
+print(avgAbundPlot, vp=viewport(layout.pos.row = 2, layout.pos.col = 1))
+print(maxAbundPlot, vp=viewport(layout.pos.row = 2, layout.pos.col = 2))
+#export at 1800 x 1600
+
+
+
+
+
+
 
   #spread(key=year_trt2, value=PA2)%>% ###I don't think we want to do this, because it is then unclear which are missing data and which are true 0s
 
