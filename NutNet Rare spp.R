@@ -17,6 +17,13 @@ library(tidyr)
 library(purrr)
 library(grid)
 
+theme_set(theme_bw())
+theme_update(axis.title.x=element_text(size=20, vjust=-0.35, margin=margin(t=15)), axis.text.x=element_text(size=16),
+             axis.title.y=element_text(size=20, angle=90, vjust=0.5, margin=margin(r=15)), axis.text.y=element_text(size=16),
+             plot.title = element_text(size=24, vjust=2),
+             panel.grid.major=element_blank(), panel.grid.minor=element_blank(),
+             legend.title=element_blank(), legend.text=element_text(size=20))
+
 nutnetdf <-read.csv("full-cover-09-June-2017.csv")
 # 
 # nutnetpretreatdt <- data.table(nutnetpretreatdf)
@@ -58,13 +65,13 @@ freq <- freq%>%
   mutate(freq=PTfreq/num_plots)
 
 #### Process data to create a max cover or 0 for each species, plot & year #### 
-nutnetdf_allspp <- nutnetRel %>%
-  select(-Family, -live:-ps_path) %>%
-  group_by(site_name, site_code) %>%
-  nest() %>%
-  mutate(spread_df = purrr::map(data, ~spread(., key=Taxon, value=rel_cover, fill=0) %>%
+nutnetdf_allspp <- nutnetRel%>%
+  select(-Family, -live:-total_cover)%>%
+  group_by(site_name, site_code)%>%
+  nest()%>%
+  mutate(spread_df = purrr::map(data, ~spread(., key=Taxon, value=rel_cover, fill=0)%>%
                                      gather(key=Taxon, value=rel_cover,
-                                            -year:-trt))) %>%
+                                            -year:-trt)))%>%
   unnest(spread_df)
 nutnetdf_allspp <- as.data.frame(nutnetdf_allspp)
 
@@ -73,7 +80,7 @@ nutnetdf_allspp <- as.data.frame(nutnetdf_allspp)
 nutnetdf_allspp$PA = ifelse(nutnetdf_allspp$rel_cover > 0, 1, 0)
 
 nutnetdf_length <- as.data.frame(nutnetdf_allspp)%>%
-  #make a column for max trt year and filter out max year <5
+  #make a column for max trt year
   group_by(site_code)%>%
   summarise(length=max(year_trt))
 
@@ -86,35 +93,44 @@ nutnetdf_allspp2 <- nutnetdf_allspp%>%
   group_by(site_code, Taxon, site_name, block, plot, subplot, year_trt2, length)%>% ###there's duplicate entries for some spp; need to fix this some day
   summarise(PA2=mean(PA))%>%
   ungroup()%>%
-  group_by(site_code, Taxon, site_name, block, plot, subplot, length)%>%
+  group_by(site_code, Taxon, plot, length)%>%
   summarise(PA3=sum(PA2))%>%
-  ungroup()%>%
-  mutate(yrs_absent=(length-PA3)/length)%>% #some of these are negative, wtf
-  merge(meanAb_byspecies, by=c('site_code', 'Taxon'), all=T)%>%
-  merge(max_abund, by=c('site_code', 'Taxon'), all=T)%>%
-  merge(freq, by=c('site_code', 'Taxon'), all=T)%>%
+  ungroup()
+
+nutnetpretrt <- nutnetpretreatdf_live%>%
+  mutate(pretrt_cover=rel_cover)%>%
+  select(site_code, plot, Taxon, pretrt_cover)
+
+nutnetdf_allspp3 <- nutnetdf_allspp2%>%
+  mutate(yrs_absent=(length-PA3)/length)%>%
+  left_join(nutnetpretrt)%>%
+  filter(!is.na(pretrt_cover))%>%
+  merge(meanAb_byspecies, by=c('site_code', 'Taxon'))%>%
+  merge(max_abund, by=c('site_code', 'Taxon'))%>%
+  merge(freq, by=c('site_code', 'Taxon'))%>%
   mutate(abund_metric=(2*meanPTAbundance+freq)/3)%>%
+  select(-PTfreq)%>%
   filter(length>0)
 
 
 ###figures of proportion of years absent for the various abundance metrics
-metricPlot <- ggplot(nutnetdf_allspp2, aes(x=abund_metric, y=yrs_absent, color=length)) +
-  geom_point() +
+metricPlot <- ggplot(nutnetdf_allspp3, aes(x=abund_metric, y=yrs_absent, color=length)) +
+  geom_point(alpha=0.1, size=3) +
   xlab('Pre-Treatment Modified Importance Index') +
   ylab('Proportion of Years Absent')
 
-freqPlot <- ggplot(nutnetdf_allspp2, aes(x=freq, y=yrs_absent, color=length)) +
-  geom_point() +
+freqPlot <- ggplot(nutnetdf_allspp3, aes(x=freq, y=yrs_absent, color=length)) +
+  geom_point(alpha=0.1, size=3) +
   xlab('Pre-Treatment Frequency') +
   ylab('Proportion of Years Absent')
 
-avgAbundPlot <- ggplot(nutnetdf_allspp2, aes(x=meanPTAbundance, y=yrs_absent, color=length)) +
-  geom_point() +
+avgAbundPlot <- ggplot(nutnetdf_allspp3, aes(x=meanPTAbundance, y=yrs_absent, color=length)) +
+  geom_point(alpha=0.1, size=3) +
   xlab('Pre-Treatment Mean Abundance') +
   ylab('Proportion of Years Absent')
 
-maxAbundPlot <- ggplot(nutnetdf_allspp2, aes(x=maxPTAbundance, y=yrs_absent, color=length)) +
-  geom_point() +
+maxAbundPlot <- ggplot(nutnetdf_allspp3, aes(x=maxPTAbundance, y=yrs_absent, color=length)) +
+  geom_point(alpha=0.1, size=3) +
   xlab('Pre-Treatment Max Abundance') +
   ylab('Proportion of Years Absent')
 
@@ -133,14 +149,15 @@ trt <- nutnetRel%>%
   select(-year_trt)%>%
   unique()
 
-nutnetdf_allspp2Trt <- nutnetdf_allspp2%>%
+nutnetdf_allspp3Trt <- nutnetdf_allspp3%>%
   merge(trt, by=c('site_code', 'plot'))
 
-ggplot(nutnetdf_allspp2Trt, aes(x=abund_metric, y=yrs_absent, color=length)) +
-  geom_point() +
+ggplot(nutnetdf_allspp3Trt, aes(x=abund_metric, y=yrs_absent, color=length)) +
+  geom_point(size=3) +
   xlab('Pre-Treatment Modified Importance Index') +
   ylab('Proportion of Years Absent') +
   facet_wrap(~trt)
+#export at 1200x1200
 
 
 ###count concecutive 0's: how long is a sp lost?
@@ -164,6 +181,10 @@ nutnetOrder <- nutnetdf_allspp[with(nutnetdf_allspp, order(site_code, plot, Taxo
 
 nutnetConsAbs <- nutnetOrder%>%
   filter(year_trt>0)%>%
+  select(site_code, year_trt, plot, Taxon, trt, rel_cover, PA)%>%
+  group_by(site_code, year_trt, plot, Taxon, trt, rel_cover, PA)%>%
+  unique()%>%
+  ungroup()%>%
   group_by(site_code, plot, Taxon)%>%
   nest()%>%
   mutate(mutate_df = purrr::map(data, ~mutate(., cons_abs=cumul_zeros(PA))))%>%
@@ -181,16 +202,17 @@ nutnetConsAbs2 <- nutnetConsAbs%>%
   merge(nutnetdf_length, by=c('site_code'))
 
 ggplot(subset(nutnetConsAbs2, length==9), aes(x=abund_metric, y=cons_abs_max)) +
-  geom_point(alpha=0.1) +
+  geom_point(alpha=0.1, size=3) +
   xlab('Pre-Treatment Modified Importance Index') +
   ylab('Consecutive Years Absent') +
   facet_wrap(~trt)
+#export at 1200x1200
 
-ggplot(subset(nutnetConsAbs2, length==9), aes(x=meanPTAbundance, y=cons_abs_max)) +
-  geom_point(alpha=0.1) +
-  xlab('Pre-Treatment Mean Abundance') +
-  ylab('Consecutive Years Absent') +
-  facet_wrap(~trt)
+# ggplot(subset(nutnetConsAbs2, length==9), aes(x=meanPTAbundance, y=cons_abs_max)) +
+#   geom_point(alpha=0.1) +
+#   xlab('Pre-Treatment Mean Abundance') +
+#   ylab('Consecutive Years Absent') +
+#   facet_wrap(~trt)
 
 
 
@@ -209,6 +231,28 @@ ggplot(nutnetPresAbs, aes(x=abund_metric, y=PA, color=trt)) +
   xlab('Pre-Treatment Modified Importance Index') +
   ylab('Presence (1)/Absence (0)') +
   facet_wrap(~year_trt)
+
+
+
+#add in final year abundances to see if species do persist, how does their abundance change
+nutnet_finalabund <- nutnetdf_allspp%>%
+  filter(year_trt==9)%>%
+  mutate(final_cover=rel_cover)%>%
+  select(site_code, plot, trt, final_cover, Taxon)
+
+nutnet_finalabund2 <- nutnetdf_allspp3Trt%>%
+  group_by(site_code, plot, Taxon, length, PA3, yrs_absent, pretrt_cover, meanPTAbundance, maxPTAbundance, num_plots, freq, abund_metric, trt)%>%
+  unique()%>%
+  ungroup()%>%
+  left_join(nutnet_finalabund)%>%
+  filter(!is.na(final_cover))
+
+ggplot(nutnet_finalabund2, aes(x=abund_metric, y=final_cover)) +
+  geom_point(size=3) +
+  xlab('Pre-Treatment Modified Importance Index') +
+  ylab('Final Year (9) Relative Abundance') + 
+  facet_wrap(~trt)
+#export at 1200x1200
 
 
   #spread(key=year_trt2, value=PA2)%>% ###I don't think we want to do this, because it is then unclear which are missing data and which are true 0s
