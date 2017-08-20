@@ -280,6 +280,7 @@ ggplot(biomassSpp, aes(x=importance, y=biomass)) +
   geom_point(size=3, alpha=0.1) +
   xlab('Pre-Treatment Modified Importance Index') +
   ylab('Aboveground Biomass')
+#export at 900x900
 
 
 
